@@ -40,6 +40,7 @@ def VariationalBlock(feature_shape, latent_channels):
         sample=module.Variational(
             # feature -> absolute_parameters
             parameters=ModuleCompose(
+                nn.AdaptiveAvgPool2d(1),
                 nn.Conv2d(channels, channels, kernel_size=1),
                 module.Swish(),
                 nn.Conv2d(channels, latent_channels * 2, kernel_size=1),
@@ -47,9 +48,22 @@ def VariationalBlock(feature_shape, latent_channels):
             )
         ),
         # sample -> decoded_sample
+        # decoded_sample=ModuleCompose(
+        #     nn.Conv2d(latent_channels, channels, kernel_size=1),
+        #     DecoderCell(channels),
+        # ),
         decoded_sample=ModuleCompose(
-            nn.Conv2d(latent_channels, channels, kernel_size=1),
-            DecoderCell(channels),
+            lambda sample: sample.expand((
+                *sample.shape[:2], *feature_shape[-2:]
+            )),
+            module.FourierSampleDecoder(
+                fourier_channels=latent_channels,
+                decoded=ModuleCompose(
+                    nn.Conv2d(latent_channels * 2, channels, kernel_size=1),
+                    Swish(),
+                    nn.Conv2d(channels, channels, kernel_size=1),
+                ),
+            ),
         ),
         # decoded_sample -> upsample / previous
         upsample=ModuleCompose(
@@ -74,6 +88,7 @@ def RelativeVariationalBlock(previous_shape, feature_shape, latent_channels, ups
             # previous -> absolute_parameters
             absolute_parameters=ModuleCompose(
                 DecoderCell(previous_shape[1]),
+                nn.AdaptiveAvgPool2d(1),
                 nn.Conv2d(previous_shape[1], channels, kernel_size=1),
                 module.Swish(),
                 nn.Conv2d(channels, latent_channels * 2, kernel_size=1),
@@ -86,16 +101,31 @@ def RelativeVariationalBlock(previous_shape, feature_shape, latent_channels, ups
                     torch.cat([previous, feature], dim=1)
                 ),
                 DecoderCell(previous_shape[1] + feature_shape[1]),
+                nn.AdaptiveAvgPool2d(1),
                 nn.Conv2d(previous_shape[1] + feature_shape[1], channels, kernel_size=1),
                 module.Swish(),
                 nn.Conv2d(channels, latent_channels * 2, kernel_size=1),
                 partial(torch.chunk, chunks=2, dim=1),
             ),
         ),
+        # # sample -> decoded_sample
+        # decoded_sample=ModuleCompose(
+        #     nn.Conv2d(latent_channels, channels, kernel_size=1),
+        #     DecoderCell(channels),
+        # ),
         # sample -> decoded_sample
         decoded_sample=ModuleCompose(
-            nn.Conv2d(latent_channels, channels, kernel_size=1),
-            DecoderCell(channels),
+            lambda sample: sample.expand((
+                *sample.shape[:2], *feature_shape[-2:]
+            )),
+            module.FourierSampleDecoder(
+                fourier_channels=latent_channels,
+                decoded=ModuleCompose(
+                    nn.Conv2d(latent_channels * 2, channels, kernel_size=1),
+                    Swish(),
+                    nn.Conv2d(channels, channels, kernel_size=1),
+                ),
+            ),
         ),
         # decoded_sample, previous -> upsample / previous
         upsample=ModuleCompose(
