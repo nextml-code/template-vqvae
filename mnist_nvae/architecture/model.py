@@ -13,6 +13,7 @@ class Model(nn.Module):
         self.encoder = architecture.Encoder(16, levels=config['levels'])
 
         self.latent_channels = 20
+        self.eval()
         self.decoder = architecture.DecoderNVAE(
             example_features=self.encoder(torch.zeros(
                 1, 3, problem.settings.HEIGHT, problem.settings.WIDTH
