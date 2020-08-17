@@ -35,35 +35,20 @@ class DecoderCell(nn.Module):
 
 def VariationalBlock(feature_shape, latent_channels):
     channels = feature_shape[1]
+    feature_size = np.prod(feature_shape[-2:])
     return module.VariationalBlock(
         # feature -> sample
-        sample=module.Variational(
-            # feature -> absolute_parameters
-            parameters=ModuleCompose(
-                nn.AdaptiveAvgPool2d(1),
-                nn.Conv2d(channels, channels, kernel_size=1),
-                module.Swish(),
-                nn.Conv2d(channels, latent_channels * 2, kernel_size=1),
-                partial(torch.chunk, chunks=2, dim=1),
-            )
+        sample=module.VectorQuantizerSampler(
+            nn.Conv2d(feature_shape[1], latent_channels, kernel_size=1),
+            module.VectorQuantizer(
+                latent_channels * feature_size,
+                n_embeddings=128
+            ),
         ),
         # sample -> decoded_sample
-        # decoded_sample=ModuleCompose(
-        #     nn.Conv2d(latent_channels, channels, kernel_size=1),
-        #     DecoderCell(channels),
-        # ),
         decoded_sample=ModuleCompose(
-            lambda sample: sample.expand((
-                *sample.shape[:2], *feature_shape[-2:]
-            )),
-            module.FourierSampleDecoder(
-                fourier_channels=latent_channels,
-                decoded=ModuleCompose(
-                    nn.Conv2d(latent_channels * 2, channels, kernel_size=1),
-                    Swish(),
-                    nn.Conv2d(channels, channels, kernel_size=1),
-                ),
-            ),
+            nn.Conv2d(latent_channels, channels, kernel_size=1),
+            DecoderCell(channels),
         ),
         # decoded_sample -> upsample / previous
         upsample=ModuleCompose(
@@ -82,6 +67,7 @@ def VariationalBlock(feature_shape, latent_channels):
 
 def RelativeVariationalBlock(previous_shape, feature_shape, latent_channels, upsample=True):
     channels = feature_shape[1]
+    feature_size = np.prod(feature_shape[-2:])
     return module.RelativeVariationalBlock(
         # previous, feature -> sample
         sample=module.RelativeVariational(
