@@ -48,10 +48,11 @@ def train(config):
     ])
     print(f'n_parameters: {n_parameters:,}')
 
-    kl_weights = [10, 1009, 1331, 7422, 2906, 35718, 7958, 301485, 172319]
+    kl_weights = [50177.369098496034, 98315.8454035585, 84373.78632360564, 92363.37745811626, 80569.63008294713, 19989.10706678479, 14263.762771436646, 4717432.553917795, 1149095.8928533676]
+    kl_weights = [kl * 0.1 for kl in kl_weights]
     kl_pids = [PID(
         -1.0, -0.1, -0.5,
-        setpoint=-3,
+        setpoint=-1,
         auto_mode=False,
     ) for _ in kl_weights]
     for pid, initial_weight in zip(kl_pids, kl_weights):
