@@ -44,7 +44,8 @@ class Prediction(BaseModel):
 
 class PredictionBatch(BaseModel):
     predicted_image: torch.Tensor
-    kl_losses: Optional[List[torch.Tensor]]
+    vq_losses: Optional[List[torch.Tensor]]
+    perplexities: Optional[List[torch.Tensor]]
 
     class Config:
         arbitrary_types_allowed = True
@@ -69,10 +70,10 @@ class PredictionBatch(BaseModel):
             ])
         ).to(self.predicted_image)
 
-    def loss(self, examples, kl_weights):
+    def loss(self, examples):
         return (
             self.mse(examples)
-            + sum([w * kl for w, kl in zip(kl_weights, self.kl_losses)])
+            + 0.25 * sum(self.vq_losses)
         )
 
     def mse(self, examples):

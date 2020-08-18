@@ -73,19 +73,21 @@ class VectorQuantizer(nn.Module):
         # Encoding
         encoding_indices = torch.argmin(distances, dim=1).unsqueeze(1)
         encodings = torch.zeros(encoding_indices.shape[0], self.n_embeddings, device=inputs.device)
-        encodings.scatter_(1, encoding_indices, 1)
+        encodings.scatter_(dim=1, index=encoding_indices, value=1)
         
         # Quantize and unflatten
         # TODO: unclear why they are doing this ugly stuff?
-        # Checked, seems to give same result as
-        # quantized = self.embedding(encoding_indices)
         quantized = torch.matmul(encodings, self.embedding.weight).view(input_shape)
+
+        # Checked, seems to give same result as
+        # encoding_indices = torch.argmin(distances, dim=1).unsqueeze(1)
+        # quantized = self.embedding(encoding_indices)
         
         # Use EMA to update the embedding vectors
         if self.training:
             self._ema_cluster_size = (
                 self._ema_cluster_size * self.decay
-                + (1 - self.decay) * torch.sum(encodings, 0)
+                + (1 - self.decay) * torch.sum(encodings, dim=0)
             )
             
             # Laplace smoothing of the cluster size
@@ -102,7 +104,6 @@ class VectorQuantizer(nn.Module):
         
         # Loss
         e_latent_loss = F.mse_loss(quantized.detach(), inputs)
-        # loss = self._commitment_cost * e_latent_loss
         
         # Straight Through Estimator
         quantized = inputs + (quantized - inputs).detach()
@@ -113,7 +114,7 @@ class VectorQuantizer(nn.Module):
         return (
             quantized.permute(0, 3, 1, 2).contiguous(),
             e_latent_loss,
-            # perplexity,
+            perplexity,
             # encodings,
         )
 
@@ -124,12 +125,21 @@ class VectorQuantizerSampler(nn.Module):
         self.block = block
         self.vector_quantizer = vector_quantizer
 
-    def forward(self, x):
-        return self.vector_quantizer(self.block(x))
+    def forward(self, *args):
+        return self.vector_quantizer(self.block(*args))
 
     def generated(self, shape):
         return self.vector_quantizer.embedding(
             torch.randint(self.vector_quantizer.n_embeddings, shape[:1])
             .to(module_device(self))
-            # torch.LongTensor([0]).repeat(shape[0])
         ).view(*shape)
+
+
+# Train model to predict
+# Use encoder to guess best sample?
+
+
+# Forward is sampling
+# Encoder is cheating
+
+

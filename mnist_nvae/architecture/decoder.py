@@ -42,7 +42,7 @@ def VariationalBlock(feature_shape, latent_channels):
             nn.Conv2d(feature_shape[1], latent_channels, kernel_size=1),
             module.VectorQuantizer(
                 latent_channels * feature_size,
-                n_embeddings=128
+                n_embeddings=512,
             ),
         ),
         # sample -> decoded_sample
@@ -70,53 +70,27 @@ def RelativeVariationalBlock(previous_shape, feature_shape, latent_channels, ups
     feature_size = np.prod(feature_shape[-2:])
     return module.RelativeVariationalBlock(
         # previous, feature -> sample
-        sample=module.RelativeVariational(
-            # previous -> absolute_parameters
-            absolute_parameters=ModuleCompose(
-                DecoderCell(previous_shape[1]),
-                nn.AdaptiveAvgPool2d(1),
-                nn.Conv2d(previous_shape[1], channels, kernel_size=1),
-                module.Swish(),
-                nn.Conv2d(channels, latent_channels * 2, kernel_size=1),
-                partial(torch.chunk, chunks=2, dim=1),
-            ),
-            # previous, feature -> relative_parameters
-            relative_parameters=ModuleCompose(
+        sample=module.VectorQuantizerSampler(
+            ModuleCompose(
                 lambda previous, feature: (
-                    # tools.center_slice_cat([previous, feature], dim=1)
                     torch.cat([previous, feature], dim=1)
                 ),
                 DecoderCell(previous_shape[1] + feature_shape[1]),
-                nn.AdaptiveAvgPool2d(1),
-                nn.Conv2d(previous_shape[1] + feature_shape[1], channels, kernel_size=1),
-                module.Swish(),
-                nn.Conv2d(channels, latent_channels * 2, kernel_size=1),
-                partial(torch.chunk, chunks=2, dim=1),
+                nn.Conv2d(previous_shape[1] + feature_shape[1], latent_channels, kernel_size=1),
+            ),
+            module.VectorQuantizer(
+                latent_channels * feature_size,
+                n_embeddings=512,
             ),
         ),
-        # # sample -> decoded_sample
-        # decoded_sample=ModuleCompose(
-        #     nn.Conv2d(latent_channels, channels, kernel_size=1),
-        #     DecoderCell(channels),
-        # ),
         # sample -> decoded_sample
         decoded_sample=ModuleCompose(
-            lambda sample: sample.expand((
-                *sample.shape[:2], *feature_shape[-2:]
-            )),
-            module.FourierSampleDecoder(
-                fourier_channels=latent_channels,
-                decoded=ModuleCompose(
-                    nn.Conv2d(latent_channels * 2, channels, kernel_size=1),
-                    Swish(),
-                    nn.Conv2d(channels, channels, kernel_size=1),
-                ),
-            ),
+            nn.Conv2d(latent_channels, channels, kernel_size=1),
+            DecoderCell(channels),
         ),
         # decoded_sample, previous -> upsample / previous
         upsample=ModuleCompose(
             lambda decoded_sample, previous: (
-                # tools.center_slice_cat([decoded_sample, previous], dim=1)
                 torch.cat([decoded_sample, previous], dim=1)
             ),
             DecoderCell(channels + previous_shape[1]),
@@ -141,12 +115,12 @@ class DecoderNVAE(nn.Module):
     def __init__(self, example_features, latent_channels):
         super().__init__()
         print('example_feature.shape:', example_features[-1].shape)
+        self.latent_channels = latent_channels
+        self.latent_size = example_features[-1].shape[-2:]
         self.variational_block = VariationalBlock(
             example_features[-1].shape, latent_channels
         )
-        previous, _ = self.variational_block(example_features[-1])
-        self.latent_height = example_features[-1].shape[-2]
-        self.latent_width = example_features[-1].shape[-1]
+        previous, *_ = self.variational_block(example_features[-1])
 
         relative_variational_blocks = list()
         for example_feature in reversed(example_features[:-1]):
@@ -156,7 +130,7 @@ class DecoderNVAE(nn.Module):
                 relative_variational_block = RelativeVariationalBlock(
                     previous.shape, example_feature.shape, latent_channels, group_index == 1
                 )
-                previous, _ = relative_variational_block(
+                previous, *_ = relative_variational_block(
                     previous, example_feature
                 )
                 relative_variational_blocks.append(relative_variational_block)
@@ -175,26 +149,34 @@ class DecoderNVAE(nn.Module):
         )
 
     def forward(self, features):
-        head, kl = self.variational_block(features[-1])
+        head, vq_loss, perplexity = self.variational_block(features[-1])
 
-        kl_losses = [kl]
+        vq_losses = [vq_loss]
+        perplexities = [perplexity]
         for index, feature in enumerate(reversed(features[:-1])):
             for inner_index in range(2):
                 relative_variational_block = (
                     self.relative_variational_blocks[index * 2 + inner_index]
                 )
-                head, relative_kl = relative_variational_block(head, feature)
-                kl_losses.append(relative_kl)
+                head, vq_loss, perplexity = relative_variational_block(head, feature)
+                vq_losses.append(vq_loss)
+                perplexities.append(perplexity)
         
         return (
             self.image(head),
-            kl_losses,
+            vq_losses,
+            perplexities,
         )
 
-    def generated(self, shape):
-        head = self.variational_block.generated(shape)
+    def generated(self, n_samples):
+        head = self.variational_block.generated((
+            n_samples, self.latent_channels, *self.latent_size
+        ))
 
         for relative_variational_block in self.relative_variational_blocks:
-            head = relative_variational_block.generated(head)
+            head = relative_variational_block.generated(
+                head,
+                (n_samples, self.latent_channels, *head.shape[-2:])
+            )
 
         return self.image(head)

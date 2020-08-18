@@ -27,13 +27,19 @@ def train_metrics():
             epoch_bound=False,
             alpha=1e-7,
         ),
-        kl=ignite.metrics.RunningAverage(
+        vq_loss=ignite.metrics.RunningAverage(
             output_transform=lambda output: (
-                torch.tensor(output['predictions'].kl_losses)
+                torch.tensor(output['predictions'].vq_losses)
             ),
             epoch_bound=False,
-            # alpha=1e-7,
-            alpha=0.9,
+            alpha=1e-7,
+        ),
+        perplexity=ignite.metrics.RunningAverage(
+            output_transform=lambda output: (
+                torch.tensor(output['predictions'].perplexities)
+            ),
+            epoch_bound=False,
+            alpha=1e-7,
         ),
     )
 
@@ -46,7 +52,10 @@ def evaluate_metrics():
         mse=ignite.metrics.Average(lambda output: (
             output['predictions'].mse(output['examples'])
         )),
-        kl=ignite.metrics.Average(lambda output: (
-            torch.tensor(output['predictions'].kl_losses)
+        vq_loss=ignite.metrics.Average(lambda output: (
+            torch.tensor(output['predictions'].vq_losses)
+        )),
+        perplexity=ignite.metrics.Average(lambda output: (
+            torch.tensor(output['predictions'].perplexities)
         )),
     )

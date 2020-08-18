@@ -33,22 +33,18 @@ class Model(nn.Module):
     def forward(self, image_batch):
         image_batch = image_batch.permute(0, 3, 1, 2).to(module_device(self))
         features = self.encoder(image_batch)
-        predicted_image, kl_losses = self.decoder(features)
+        predicted_image, vq_losses, perplexities = self.decoder(features)
         return architecture.PredictionBatch(
             predicted_image=predicted_image.permute(0, 2, 3, 1),
-            kl_losses=kl_losses,
+            vq_losses=vq_losses,
+            perplexities=perplexities,
         )
 
     def prediction(self, features_batch: architecture.FeaturesBatch):
         return self(features_batch.image_batch)
 
     def generated(self, n_samples):
-        predicted_image = self.decoder.generated((
-            n_samples,
-            self.latent_channels,
-            self.decoder.latent_height,
-            self.decoder.latent_width,
-        ))
+        predicted_image = self.decoder.generated(n_samples)
         return architecture.PredictionBatch(
             predicted_image=predicted_image.permute(0, 2, 3, 1),
         )
