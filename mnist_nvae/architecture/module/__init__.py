@@ -7,8 +7,6 @@ from mnist_nvae.architecture.module.random_fourier import (
     RandomFourier, FourierSampleDecoder
 )
 from mnist_nvae.architecture.module.variational import (
-    Variational,
-    RelativeVariational,
     VariationalBlock,
     RelativeVariationalBlock,
 )

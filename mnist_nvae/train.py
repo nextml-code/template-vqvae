@@ -48,32 +48,17 @@ def train(config):
     ])
     print(f'n_parameters: {n_parameters:,}')
 
-    kl_weights = [50177.369098496034, 98315.8454035585, 84373.78632360564, 92363.37745811626, 80569.63008294713, 19989.10706678479, 14263.762771436646, 4717432.553917795, 1149095.8928533676]
-    kl_weights = [kl * 0.1 for kl in kl_weights]
-    kl_pids = [PID(
-        -1.0, -0.1, -0.5,
-        setpoint=-1,
-        auto_mode=False,
-    ) for _ in kl_weights]
-    for pid, initial_weight in zip(kl_pids, kl_weights):
-        pid.set_auto_mode(True, last_output=np.log10(initial_weight))
-
     def process_batch(examples):
         predictions = model.prediction(
             architecture.FeaturesBatch.from_examples(examples)
         )
-        return predictions, predictions.loss(examples, kl_weights)
+        return predictions, predictions.loss(examples)
 
 
     @workflow.ignite.decorators.train(model, optimizer)
     def train_batch(engine, examples):
         predictions, loss = process_batch(examples)
         loss.backward()
-
-        # if engine.state.epoch >= 10 and engine.state.iteration % 50 == 0:
-        if engine.state.iteration % 50 == 0:
-            for index, (pid, kl) in enumerate(zip(kl_pids, predictions.kl_losses)):
-                kl_weights[index] = 10 ** pid(np.log10(kl.item()), dt=1)
 
         return dict(
             examples=examples,
@@ -116,10 +101,6 @@ def train(config):
         optimizers=optimizer,
     )
 
-    @trainer.on(ignite.engine.Events.EPOCH_COMPLETED)
-    def log_kl_weights(engine):
-        print('\nkl_weights:', kl_weights)
-
     workflow.ignite.handlers.ModelScore(
         # lambda: -evaluators['evaluate_early_stopping'].state.metrics['mse'],
         lambda: trainer.state.epoch,
@@ -145,8 +126,14 @@ def train(config):
                 f'{description}/predictions',
                 np.stack([
                     np.concatenate([
-                        np.array(engine.state.output['examples'][index].representation()),
-                        np.array(engine.state.output['predictions'][index].representation()),
+                        np.array(
+                            engine.state.output['examples'][index]
+                            .representation()
+                        ),
+                        np.array(
+                            engine.state.output['predictions'][index]
+                            .representation()
+                        ),
                     ], axis=0) / 255
                     for index in indices
                 ]),
