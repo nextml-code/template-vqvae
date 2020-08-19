@@ -14,11 +14,11 @@ class VariationalBlock(nn.Module):
         self.upsample = upsample
 
     def forward(self, head):
-        sample, vq_loss, perplexity = self.sample(head)
+        sample, commitment_loss, perplexity = self.sample(head)
         upsample = self.upsample(
             self.decoded_sample(sample)
         )
-        return upsample, vq_loss, perplexity
+        return upsample, commitment_loss, perplexity
 
     def generated(self, shape):
         return self.upsample(
@@ -36,12 +36,12 @@ class RelativeVariationalBlock(nn.Module):
         self.upsample = upsample
 
     def forward(self, previous, feature):
-        sample, vq_loss, perplexity = self.sample(previous, feature)
+        sample, commitment_loss, perplexity = self.sample(previous, feature)
         upsample = self.upsample(
             self.decoded_sample(sample),
             previous,
         )
-        return upsample, vq_loss, perplexity
+        return upsample, commitment_loss, perplexity
 
     def generated(self, previous, shape):
         return self.upsample(

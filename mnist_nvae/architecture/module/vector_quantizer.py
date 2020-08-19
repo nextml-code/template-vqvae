@@ -115,31 +115,6 @@ class VectorQuantizer(nn.Module):
             quantized.permute(0, 3, 1, 2).contiguous(),
             e_latent_loss,
             perplexity,
+            encoding_indices,
             # encodings,
         )
-
-
-class VectorQuantizerSampler(nn.Module):
-    def __init__(self, block, vector_quantizer):
-        super().__init__()
-        self.block = block
-        self.vector_quantizer = vector_quantizer
-
-    def forward(self, *args):
-        return self.vector_quantizer(self.block(*args))
-
-    def generated(self, shape):
-        return self.vector_quantizer.embedding(
-            torch.randint(self.vector_quantizer.n_embeddings, shape[:1])
-            .to(module_device(self))
-        ).view(*shape)
-
-
-# Train model to predict
-# Use encoder to guess best sample?
-
-
-# Forward is sampling
-# Encoder is cheating
-
-
