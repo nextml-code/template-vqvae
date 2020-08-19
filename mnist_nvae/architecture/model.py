@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from workflow.torch import ModuleCompose, module_device
 
 from mnist_nvae import architecture, problem
+from mnist_nvae.architecture import module
 
 
 class Model(nn.Module):
@@ -19,6 +20,10 @@ class Model(nn.Module):
                 1, 3, problem.settings.HEIGHT, problem.settings.WIDTH
             )),
             latent_channels=self.latent_channels,
+            level_sizes=[
+                (config['levels'] + 1 - index)
+                for index in range(config['levels'])
+            ]
         )
 
         def add_sn(m):
@@ -33,10 +38,13 @@ class Model(nn.Module):
     def forward(self, image_batch):
         image_batch = image_batch.permute(0, 3, 1, 2).to(module_device(self))
         features = self.encoder(image_batch)
-        predicted_image, vq_losses, perplexities = self.decoder(features)
+        predicted_image, commitment_losses, sample_losses, perplexities = (
+            self.decoder(features)
+        )
         return architecture.PredictionBatch(
             predicted_image=predicted_image.permute(0, 2, 3, 1),
-            vq_losses=vq_losses,
+            commitment_losses=commitment_losses,
+            sample_losses=sample_losses,
             perplexities=perplexities,
         )
 
