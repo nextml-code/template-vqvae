@@ -38,7 +38,7 @@ class Model(nn.Module):
     def forward(self, image_batch):
         image_batch = image_batch.permute(0, 3, 1, 2).to(module_device(self))
         features = self.encoder(image_batch)
-        predicted_image, commitment_losses, sample_losses, perplexities = (
+        predicted_image, commitment_losses, sample_losses, perplexities, usages = (
             self.decoder(features)
         )
         return architecture.PredictionBatch(
@@ -46,6 +46,7 @@ class Model(nn.Module):
             commitment_losses=commitment_losses,
             sample_losses=sample_losses,
             perplexities=perplexities,
+            usages=usages,
         )
 
     def prediction(self, features_batch: architecture.FeaturesBatch):

@@ -34,6 +34,7 @@ class PredictionBatch(BaseModel):
     commitment_losses: Optional[List[torch.Tensor]]
     sample_losses: Optional[List[torch.Tensor]]
     perplexities: Optional[List[torch.Tensor]]
+    usages: Optional[List[float]]
 
     class Config:
         arbitrary_types_allowed = True
@@ -74,8 +75,10 @@ class PredictionBatch(BaseModel):
     def cpu(self):
         return PredictionBatch(**{
             name: (
-                value.cpu() if isinstance(value, torch.Tensor)
-                else [v.cpu() for v in value] if type(value) == list
+                value.cpu()
+                if isinstance(value, torch.Tensor)
+                else [v.cpu() for v in value] 
+                if type(value) == list and isinstance(value[0], torch.Tensor)
                 else value
             )
             for name, value in super().__iter__()
@@ -84,8 +87,10 @@ class PredictionBatch(BaseModel):
     def detach(self):
         return PredictionBatch(**{
             name: (
-                value.detach() if isinstance(value, torch.Tensor)
-                else [v.detach() for v in value] if type(value) == list
+                value.detach()
+                if isinstance(value, torch.Tensor)
+                else [v.detach() for v in value]
+                if type(value) == list and isinstance(value[0], torch.Tensor)
                 else value
             )
             for name, value in super().__iter__()
