@@ -48,6 +48,13 @@ def train_metrics():
             epoch_bound=False,
             alpha=1e-7,
         ),
+        usage=ignite.metrics.RunningAverage(
+            output_transform=lambda output: (
+                torch.tensor(output['predictions'].usages)
+            ),
+            epoch_bound=False,
+            alpha=1e-7,
+        ),
     )
 
 
@@ -67,5 +74,8 @@ def evaluate_metrics():
         )),
         perplexity=ignite.metrics.Average(lambda output: (
             torch.tensor(output['predictions'].perplexities)
+        )),
+        usage=ignite.metrics.Average(lambda output: (
+            torch.tensor(output['predictions'].usages)
         )),
     )

@@ -48,7 +48,7 @@ class AbsoluteDecoderBlock(nn.Module):
     def __init__(self, feature_shape, latent_channels):
         super().__init__()
         self.feature_shape = feature_shape
-        self.n_embeddings = 16
+        self.n_embeddings = 32
         self.latent_channels = latent_channels
         channels = feature_shape[1]
         feature_size = np.prod(feature_shape[-2:])
@@ -70,7 +70,7 @@ class AbsoluteDecoderBlock(nn.Module):
         )
     
     def forward(self, feature):
-        quantized, commitment_loss, perplexity, indices = (
+        quantized, commitment_loss, perplexity, usage, indices = (
             self.quantized(feature)
         )
         sample_loss = -self.distribution().log_prob(indices).mean()
@@ -79,6 +79,7 @@ class AbsoluteDecoderBlock(nn.Module):
             commitment_loss,
             sample_loss,
             perplexity,
+            usage,
         )
 
     def distribution(self):
@@ -101,7 +102,7 @@ class RelativeDecoderBlock(nn.Module):
     ):
         super().__init__()
         self.feature_shape = feature_shape
-        self.n_embeddings = 16
+        self.n_embeddings = 32
         self.latent_channels = latent_channels
         in_channels = previous_shape[1] + feature_shape[1]
         channels = feature_shape[1]
@@ -135,7 +136,7 @@ class RelativeDecoderBlock(nn.Module):
         )
 
     def forward(self, previous, feature):
-        quantized, commitment_loss, perplexity, indices = self.quantized(
+        quantized, commitment_loss, perplexity, usage, indices = self.quantized(
             previous, feature
         )
         sample_loss = -self.distribution(previous).log_prob(indices).mean()
@@ -149,6 +150,7 @@ class RelativeDecoderBlock(nn.Module):
             commitment_loss,
             sample_loss,
             perplexity,
+            usage,
         )
 
     def distribution(self, previous):
@@ -209,23 +211,25 @@ class DecoderNVAE(nn.Module):
         )
 
     def forward(self, features):
-        head, commitment_loss, sample_loss, perplexity = (
+        head, commitment_loss, sample_loss, perplexity, usage = (
             self.absolute_block(features[-1])
         )
 
         commitment_losses = [commitment_loss]
         sample_losses = [sample_loss]
         perplexities = [perplexity]
+        usages = [usage]
         for relative_block_list, feature in zip(
             self.relative_blocks, reversed(features)
         ):
             for relative_block in relative_block_list:
-                head, commitment_loss, sample_loss, perplexity = (
+                head, commitment_loss, sample_loss, perplexity, usage = (
                     relative_block(head, feature)
                 )
                 commitment_losses.append(commitment_loss)
                 sample_losses.append(sample_loss)
                 perplexities.append(perplexity)
+                usages.append(usage)
 
                 # if feature.shape[-1] == 32:
                 #     import pdb
@@ -242,6 +246,7 @@ class DecoderNVAE(nn.Module):
             commitment_losses,
             sample_losses,
             perplexities,
+            usages,
         )
 
     def generated(self, n_samples):
