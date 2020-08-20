@@ -1,5 +1,3 @@
-import pdb
-
 from functools import partial
 import numpy as np
 import torch.nn as nn
@@ -18,10 +16,10 @@ def Upsample(in_channels, out_channels):
     return nn.ConvTranspose2d(
         in_channels,  # channels + previous_shape[1],
         out_channels,  # channels // 2,
-        kernel_size=3,
+        kernel_size=2,
         stride=2,
-        padding=1,
-        output_padding=1,
+        # padding=1,
+        # output_padding=1,
     )
 
 
@@ -50,7 +48,7 @@ class AbsoluteDecoderBlock(nn.Module):
     def __init__(self, feature_shape, latent_channels):
         super().__init__()
         self.feature_shape = feature_shape
-        self.n_embeddings = 512
+        self.n_embeddings = 16
         self.latent_channels = latent_channels
         channels = feature_shape[1]
         feature_size = np.prod(feature_shape[-2:])
@@ -90,7 +88,10 @@ class AbsoluteDecoderBlock(nn.Module):
         indices = self.distribution().sample((n_samples,))
         return self.compute(
             self.quantizer.embedding(indices)
-            .view(-1, self.latent_channels, *self.feature_shape[-2:])
+            .detach()
+            .view(-1, *self.feature_shape[-2:], self.latent_channels)
+            .permute(0, 3, 1, 2)
+            .contiguous()
         )
 
 
@@ -100,7 +101,7 @@ class RelativeDecoderBlock(nn.Module):
     ):
         super().__init__()
         self.feature_shape = feature_shape
-        self.n_embeddings = 512
+        self.n_embeddings = 16
         self.latent_channels = latent_channels
         in_channels = previous_shape[1] + feature_shape[1]
         channels = feature_shape[1]
@@ -108,7 +109,7 @@ class RelativeDecoderBlock(nn.Module):
 
         self.quantizer = module.VectorQuantizer(
             latent_channels * feature_size,
-            n_embeddings=512,
+            n_embeddings=self.n_embeddings,
         )
         self.quantized = ModuleCompose(
             lambda previous, feature: (
@@ -128,8 +129,8 @@ class RelativeDecoderBlock(nn.Module):
         )
         self.logits = nn.Sequential(
             DecoderCell(previous_shape[1]),
-            nn.Conv2d(previous_shape[1], self.n_embeddings, kernel_size=1),
             nn.AdaptiveAvgPool2d(1),
+            nn.Conv2d(previous_shape[1], self.n_embeddings, kernel_size=1),
             nn.Flatten(),
         )
 
@@ -157,7 +158,10 @@ class RelativeDecoderBlock(nn.Module):
         indices = self.distribution(previous).sample()
         quantized = (
             self.quantizer.embedding(indices)
-            .view(-1, self.latent_channels, *self.feature_shape[-2:])
+            .detach()
+            .view(-1, *self.feature_shape[-2:], self.latent_channels)
+            .permute(0, 3, 1, 2)
+            .contiguous()
         )
         return self.compute(torch.cat([quantized, previous], dim=1))
 
@@ -212,7 +216,9 @@ class DecoderNVAE(nn.Module):
         commitment_losses = [commitment_loss]
         sample_losses = [sample_loss]
         perplexities = [perplexity]
-        for relative_block_list, feature in zip(self.relative_blocks, reversed(features)):
+        for relative_block_list, feature in zip(
+            self.relative_blocks, reversed(features)
+        ):
             for relative_block in relative_block_list:
                 head, commitment_loss, sample_loss, perplexity = (
                     relative_block(head, feature)
@@ -220,7 +226,17 @@ class DecoderNVAE(nn.Module):
                 commitment_losses.append(commitment_loss)
                 sample_losses.append(sample_loss)
                 perplexities.append(perplexity)
-        
+
+                # if feature.shape[-1] == 32:
+                #     import pdb
+                #     pdb.set_trace()
+                #     relative_block2 = relative_block_list[-1]
+                #     head2, *_ = relative_block2(head, feature)
+                #     head2 = relative_block2.generated(head)
+                #     im = self.image(head2).permute(0, 2, 3, 1)
+                #     from matplotlib import pyplot
+                #     pyplot.imshow(np.uint8(im[6].cpu().detach().numpy())); pyplot.show()
+                    
         return (
             self.image(head),
             commitment_losses,
