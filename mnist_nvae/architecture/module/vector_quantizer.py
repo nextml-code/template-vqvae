@@ -112,9 +112,10 @@ class VectorQuantizer(nn.Module):
 
         # convert quantized from BHWC -> BCHW
         return (
+            # inputs.permute(0, 3, 1, 2).contiguous(),
             quantized.permute(0, 3, 1, 2).contiguous(),
             e_latent_loss,
             perplexity,
-            encoding_indices,
+            encoding_indices.squeeze(1),
             # encodings,
         )
