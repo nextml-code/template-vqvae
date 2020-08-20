@@ -62,7 +62,7 @@ class PredictionBatch(BaseModel):
         return (
             self.mse(examples)
             + 0.25 * sum(self.commitment_losses)
-            + 1000 * sum(self.sample_losses)
+            + sum(self.sample_losses)
         )
 
     def mse(self, examples):

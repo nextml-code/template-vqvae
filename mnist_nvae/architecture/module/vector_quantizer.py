@@ -41,6 +41,19 @@ class VectorQuantizer(nn.Module):
         self.decay = decay
         self.epsilon = epsilon
 
+    def update_cluster_size(self, encodings):
+        self._ema_cluster_size = (
+            self._ema_cluster_size * self.decay
+            + (1 - self.decay) * torch.sum(encodings, dim=0)
+        )
+        
+        # Laplace smoothing of the cluster size
+        n = torch.sum(self._ema_cluster_size.data)
+        self._ema_cluster_size.data = (
+            (self._ema_cluster_size + self.epsilon)
+            / (n + self.n_embeddings * self.epsilon) * n
+        )
+
     def forward(self, inputs, compute_distances_if_possible=True, record_codebook_stats=False):
         """
         Connects the module to some inputs.
@@ -62,51 +75,44 @@ class VectorQuantizer(nn.Module):
         
         # TODO: prenorm?
 
-        # TODO: use torch.cdist instead
+        # TODO: reset unused embeddings?
+
         # Calculate distances
-        distances = (
-            torch.sum(flat_input ** 2, dim=1, keepdim=True) 
-            + torch.sum(self.embedding.weight ** 2, dim=1)
-            - 2 * torch.matmul(flat_input, self.embedding.weight.t())
-        )
-        
-        # Encoding
-        encoding_indices = torch.argmin(distances, dim=1).unsqueeze(1)
-        encodings = torch.zeros(encoding_indices.shape[0], self.n_embeddings, device=inputs.device)
-        encodings.scatter_(dim=1, index=encoding_indices, value=1)
+        distances = torch.cdist(flat_input, self.embedding.weight)
         
         # Quantize and unflatten
-        # TODO: unclear why they are doing this ugly stuff?
-        quantized = torch.matmul(encodings, self.embedding.weight).view(input_shape)
+        encoding_indices = torch.argmin(distances, dim=1).unsqueeze(1)
+        quantized = self.embedding(encoding_indices).view(input_shape)
 
-        # Checked, seems to give same result as
-        # encoding_indices = torch.argmin(distances, dim=1).unsqueeze(1)
-        # quantized = self.embedding(encoding_indices)
-        
+        # Encoding
+        encodings = torch.zeros(encoding_indices.shape[0], self.n_embeddings, device=inputs.device)
+        encodings.scatter_(dim=1, index=encoding_indices, value=1)
+
         # Use EMA to update the embedding vectors
         if self.training:
-            self._ema_cluster_size = (
-                self._ema_cluster_size * self.decay
-                + (1 - self.decay) * torch.sum(encodings, dim=0)
-            )
-            
-            # Laplace smoothing of the cluster size
-            n = torch.sum(self._ema_cluster_size.data)
-            self._ema_cluster_size.data = (
-                (self._ema_cluster_size + self.epsilon)
-                / (n + self.n_embeddings * self.epsilon) * n
-            )
+            self.update_cluster_size(encodings)
             
             dw = torch.matmul(encodings.t(), flat_input)
-            self.ema_w = nn.Parameter(self.ema_w * self.decay + (1 - self.decay) * dw)
+            self.ema_w = nn.Parameter(
+                self.ema_w * self.decay + (1 - self.decay) * dw
+            )
             
-            self.embedding.weight = nn.Parameter(self.ema_w / self._ema_cluster_size.unsqueeze(1))
+            self.embedding.weight = nn.Parameter(
+                self.ema_w / self._ema_cluster_size.unsqueeze(1)
+            )
+            # TODO: should we get "quantized" after (again)?
         
         # Loss
-        e_latent_loss = F.mse_loss(quantized.detach(), inputs)
+        commitment_loss = F.mse_loss(quantized.detach(), inputs)
         
         # Straight Through Estimator
         quantized = inputs + (quantized - inputs).detach()
+        # alternative:
+        # inputs.data = quantized.data
+        # alternative idea:
+        # just pass on quantized and let optimizer improve it
+        # separate commitment loss vs embedding loss
+
         avg_probs = torch.mean(encodings, dim=0)
         perplexity = torch.exp(-torch.sum(avg_probs * torch.log(avg_probs + 1e-10)))
 
@@ -114,7 +120,7 @@ class VectorQuantizer(nn.Module):
         return (
             # inputs.permute(0, 3, 1, 2).contiguous(),
             quantized.permute(0, 3, 1, 2).contiguous(),
-            e_latent_loss,
+            commitment_loss,
             perplexity,
             encoding_indices.squeeze(1),
             # encodings,
