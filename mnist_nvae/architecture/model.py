@@ -20,6 +20,7 @@ class Model(nn.Module):
                 1, 3, problem.settings.HEIGHT, problem.settings.WIDTH
             )),
             latent_channels=self.latent_channels,
+            n_embeddings=256,
             level_sizes=[
                 (config['levels'] + 1 - index)
                 for index in range(config['levels'])

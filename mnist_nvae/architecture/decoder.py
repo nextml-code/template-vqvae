@@ -45,10 +45,10 @@ class DecoderCell(nn.Module):
 
 
 class AbsoluteDecoderBlock(nn.Module):
-    def __init__(self, feature_shape, latent_channels):
+    def __init__(self, feature_shape, latent_channels, n_embeddings):
         super().__init__()
         self.feature_shape = feature_shape
-        self.n_embeddings = 32
+        self.n_embeddings = n_embeddings
         self.latent_channels = latent_channels
         channels = feature_shape[1]
         feature_size = np.prod(feature_shape[-2:])
@@ -98,11 +98,11 @@ class AbsoluteDecoderBlock(nn.Module):
 
 class RelativeDecoderBlock(nn.Module):
     def __init__(
-        self, previous_shape, feature_shape, latent_channels, upsample=True
+        self, previous_shape, feature_shape, latent_channels, n_embeddings, upsample=True
     ):
         super().__init__()
         self.feature_shape = feature_shape
-        self.n_embeddings = 32
+        self.n_embeddings = n_embeddings
         self.latent_channels = latent_channels
         in_channels = previous_shape[1] + feature_shape[1]
         channels = feature_shape[1]
@@ -169,13 +169,13 @@ class RelativeDecoderBlock(nn.Module):
 
 
 class DecoderNVAE(nn.Module):
-    def __init__(self, example_features, latent_channels, level_sizes):
+    def __init__(self, example_features, latent_channels, n_embeddings, level_sizes):
         super().__init__()
         print('example_feature.shape:', example_features[-1].shape)
         self.latent_channels = latent_channels
         self.latent_size = example_features[-1].shape[-2:]
         self.absolute_block = AbsoluteDecoderBlock(
-            example_features[-1].shape, latent_channels
+            example_features[-1].shape, latent_channels, n_embeddings
         )
         previous, *_ = self.absolute_block(example_features[-1])
 
@@ -191,6 +191,7 @@ class DecoderNVAE(nn.Module):
                     previous.shape,
                     example_feature.shape,
                     latent_channels,
+                    n_embeddings,
                     upsample=(group_index == level_size - 1),
                 )
                 previous, *_ = relative_block(
