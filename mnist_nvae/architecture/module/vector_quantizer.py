@@ -16,7 +16,7 @@ class VectorQuantizer(nn.Module):
         self.embedding.weight.data.normal_()
 
         self.weight = nn.Parameter(
-            torch.ones(n_embeddings) * 0.001, requires_grad=False
+            torch.ones(n_embeddings) * 0.1, requires_grad=False
         )
         self.decay = decay
         self.reset_threshold = reset_threshold
@@ -47,26 +47,27 @@ class VectorQuantizer(nn.Module):
         
         # TODO: prenorm? see jukebox
 
-        # if self.training:
-        #     below_threshold = (
-        #         self.weight * self.n_embeddings <= self.reset_threshold
-        #     )
+        usage = (self.weight.data >= 1e-2).sum().item()
+        if self.training and usage <= 2:
+            below_threshold = (
+                self.weight * self.n_embeddings <= self.reset_threshold
+            )
 
-        #     flat_input_subset = flat_input
-        #     for embedding_index in torch.where(below_threshold)[0]:
-        #         distances = torch.cdist(flat_input_subset, self.embedding.weight)
-        #         batch_index = distances.max(dim=1)[1].argmax()
-        #         # batch_index = distances[:, embedding_index].argmax()
-        #         print('reset', embedding_index.item(), batch_index.item(), inputs.shape[-3:])
-        #         self.embedding.weight.data[embedding_index] = (
-        #             flat_input_subset[batch_index]
-        #         )
-        #         self.weight.data[embedding_index] = 0.1
-        #         flat_input_subset = flat_input_subset[
-        #             torch.arange(len(flat_input_subset)).to(inputs) != batch_index
-        #         ]
-        #         if len(flat_input_subset) == 0:
-        #             break
+            flat_input_subset = flat_input
+            for embedding_index in torch.where(below_threshold)[0]:
+                distances = torch.cdist(flat_input_subset, self.embedding.weight)
+                batch_index = distances.max(dim=1)[1].argmax()
+
+                print('reset', embedding_index.item(), batch_index.item(), inputs.shape[-3:])
+                self.embedding.weight.data[embedding_index] = (
+                    flat_input_subset[batch_index]
+                )
+                self.weight.data[embedding_index] = 0.1
+                flat_input_subset = flat_input_subset[
+                    torch.arange(len(flat_input_subset)).to(inputs) != batch_index
+                ]
+                if len(flat_input_subset) == 0:
+                    break
 
         distances = torch.cdist(flat_input, self.embedding.weight)
         indices = torch.argmin(distances, dim=1)
@@ -112,9 +113,13 @@ class VectorQuantizer(nn.Module):
             #     ~used_embeddings & (self.weight <= 1 / self.n_embeddings)
             # ] *= 0.99
 
+            # self.embedding.weight.data *= 0.99
         
-        commitment_loss = F.mse_loss(quantized.detach(), inputs)
-        
+        commitment_loss = (
+            F.mse_loss(quantized.detach(), inputs)
+            # + 0.01 * (inputs ** 2).mean()
+        )
+
         # alternative:
         # inputs.data = quantized.data
         # alternative idea:
@@ -127,6 +132,6 @@ class VectorQuantizer(nn.Module):
             quantized.permute(0, 3, 1, 2).contiguous(),
             commitment_loss,
             perplexity,
-            (self.weight.data >= 1e-2).sum().item(),
+            usage,
             indices,
         )

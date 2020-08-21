@@ -26,7 +26,7 @@ def Upsample(in_channels, out_channels):
 class DecoderCell(nn.Module):
     def __init__(self, channels):
         super().__init__()
-        expanded_channels = channels * 6
+        expanded_channels = channels * 3
         self.seq = nn.Sequential(
             nn.BatchNorm2d(channels),
             nn.Conv2d(channels, expanded_channels, kernel_size=1),
@@ -121,11 +121,15 @@ class RelativeDecoderBlock(nn.Module):
             self.quantizer,
         )
         self.compute = nn.Sequential(
-            DecoderCell(latent_channels + previous_shape[1]),
+            # DecoderCell(latent_channels + previous_shape[1]),
             (
                 Upsample(latent_channels + previous_shape[1], channels)
                 if upsample
-                else nn.Identity()
+                else nn.Conv2d(
+                    latent_channels + previous_shape[1],
+                    channels,
+                    kernel_size=1,
+                )
             ),
         )
         self.logits = nn.Sequential(
