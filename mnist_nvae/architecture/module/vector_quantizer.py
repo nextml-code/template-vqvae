@@ -6,7 +6,7 @@ from workflow.torch import module_device
 
 
 class VectorQuantizer(nn.Module):
-    def __init__(self, embedding_dim, n_embeddings, decay=0.99, reset_threshold=1e-4):
+    def __init__(self, embedding_dim, n_embeddings, decay=0.99, reset_threshold=0.26):
         super().__init__()
         self.eval()
         self.embedding_dim = embedding_dim
@@ -16,7 +16,7 @@ class VectorQuantizer(nn.Module):
         self.embedding.weight.data.normal_()
 
         self.weight = nn.Parameter(
-            torch.ones(n_embeddings) * 0.0, requires_grad=False
+            torch.ones(n_embeddings) * 0.001, requires_grad=False
         )
         self.decay = decay
         self.reset_threshold = reset_threshold
@@ -30,6 +30,13 @@ class VectorQuantizer(nn.Module):
             * n
         )
 
+    def updated_weight(self, mask):
+        naive_weight = (
+            self.weight * self.decay
+            + (1 - self.decay) * torch.sum(mask, dim=0)
+        )
+        return VectorQuantizer.laplace_smoothing(naive_weight)
+
     def forward(self, inputs):
         # convert inputs from BCHW -> BHWC
         inputs = inputs.permute(0, 2, 3, 1).contiguous()
@@ -40,23 +47,26 @@ class VectorQuantizer(nn.Module):
         
         # TODO: prenorm? see jukebox
 
-        if self.training:
-            below_threshold = (self.weight <= self.reset_threshold)
+        # if self.training:
+        #     below_threshold = (
+        #         self.weight * self.n_embeddings <= self.reset_threshold
+        #     )
 
-            flat_input_subset = flat_input
-            for embedding_index in torch.where(below_threshold)[0]:
-                distances = torch.cdist(flat_input_subset, self.embedding.weight)
-                batch_index = distances[:, embedding_index].argmax()
-                print('reset', embedding_index.item(), batch_index.item())
-                self.embedding.weight.data[embedding_index] = (
-                    flat_input_subset[batch_index]
-                )
-                self.weight.data[embedding_index] = 1
-                flat_input_subset = flat_input_subset[
-                    torch.arange(len(flat_input_subset)).to(inputs) != batch_index
-                ]
-                if len(flat_input_subset) == 0:
-                    break
+        #     flat_input_subset = flat_input
+        #     for embedding_index in torch.where(below_threshold)[0]:
+        #         distances = torch.cdist(flat_input_subset, self.embedding.weight)
+        #         batch_index = distances.max(dim=1)[1].argmax()
+        #         # batch_index = distances[:, embedding_index].argmax()
+        #         print('reset', embedding_index.item(), batch_index.item(), inputs.shape[-3:])
+        #         self.embedding.weight.data[embedding_index] = (
+        #             flat_input_subset[batch_index]
+        #         )
+        #         self.weight.data[embedding_index] = 0.1
+        #         flat_input_subset = flat_input_subset[
+        #             torch.arange(len(flat_input_subset)).to(inputs) != batch_index
+        #         ]
+        #         if len(flat_input_subset) == 0:
+        #             break
 
         distances = torch.cdist(flat_input, self.embedding.weight)
         indices = torch.argmin(distances, dim=1)
@@ -76,34 +86,32 @@ class VectorQuantizer(nn.Module):
         )
 
         if self.training:
-            naive_weight = mask.sum(dim=0)
-            current = (
-                mask.t() @ flat_input
-                / (naive_weight.unsqueeze(1) + 1e-7)
+            weighted_current = mask.t() @ flat_input.detach()
+            weighted_embedding = (
+                self.embedding.weight.data * self.weight.data.unsqueeze(1)
             )
 
-            average_weight = (
-                self.decay * self.weight.unsqueeze(1)
-            )
-            current_weight = (
-                (1 - self.decay) * naive_weight.unsqueeze(1)
-            )
-            total_weight = (average_weight + current_weight + 1e-7)
+            self.weight.data = self.updated_weight(mask)
 
+            # TODO: this will decay unused embeddings towards 0
+            # Seems to be from Sonnet's tf code but could be Zalando bug, seems to work better
             self.embedding.weight.data = (
-                current_weight * self.embedding.weight.data
-                + average_weight * current
-            ) / total_weight
+                self.decay * weighted_embedding
+                + (1 - self.decay) * weighted_current
+            ) / self.weight.data.unsqueeze(1)
 
-            self.weight.data = VectorQuantizer.laplace_smoothing(
-                total_weight.squeeze(1)
-            )
+            # used_embeddings = (mask >= 1).any(dim=0)
+            # self.embedding.weight.data[used_embeddings] = (
+            #     self.decay * weighted_embedding[used_embeddings]
+            #     + (1 - self.decay) * weighted_current[used_embeddings]
+            # ) / self.weight.data.unsqueeze(1)[used_embeddings]
 
-            # self.embedding.weight.data = (
-            #     self.decay * self.embedding.weight.data
-            #     + (1 - self.decay) * current
-            # )
-            # print(self.embedding.weight.data.min(), self.embedding.weight.data.max())
+            # self.embedding.weight.data[~used_embeddings] *= 0.99
+
+            # self.embedding.weight.data[
+            #     ~used_embeddings & (self.weight <= 1 / self.n_embeddings)
+            # ] *= 0.99
+
         
         commitment_loss = F.mse_loss(quantized.detach(), inputs)
         
