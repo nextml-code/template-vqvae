@@ -18,7 +18,7 @@ class Prediction(BaseModel):
 
     def image(self):
         return Image.fromarray(np.uint8(
-            self.predicted_image.squeeze(0).cpu().numpy()
+            self.predicted_image.squeeze(0).cpu().numpy() * 255
         ))
 
     def representation(self):
@@ -55,7 +55,7 @@ class PredictionBatch(BaseModel):
     def stack_images(self, examples):
         return torch.from_numpy(
             np.stack([
-                np.array(example.image) for example in examples
+                np.array(example.image) / 255 for example in examples
             ])
         ).to(self.predicted_image)
 
