@@ -1,6 +1,7 @@
 from functools import partial
 import numpy as np
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.distributions as D
 import torch
 from torch.nn.utils import weight_norm
@@ -8,7 +9,6 @@ from workflow.torch import module_device, ModuleCompose
 
 from mnist_nvae import tools
 from mnist_nvae.architecture import module
-from mnist_nvae.architecture.module import Swish
 
 
 def Upsample(in_channels, out_channels):
@@ -54,10 +54,9 @@ class AbsoluteDecoderBlock(nn.Module):
         self.n_embeddings = n_embeddings
         self.latent_channels = latent_channels
         channels = feature_shape[1]
-        feature_size = np.prod(feature_shape[-2:])
         
         self.quantizer = module.VectorQuantizer(
-            latent_channels * feature_size,
+            latent_channels,
             n_embeddings=self.n_embeddings,
         )
         self.quantized = nn.Sequential(
@@ -68,15 +67,35 @@ class AbsoluteDecoderBlock(nn.Module):
             nn.Conv2d(latent_channels, channels, kernel_size=1),
             DecoderCell(channels),
         )
-        self.logits = nn.Parameter(
-            torch.randn(self.n_embeddings) * 0.01, requires_grad=True
+        self.distribution = ModuleCompose(
+            module.MaskedConv2d(
+                latent_channels,
+                latent_channels,
+                kernel_size=3,
+                padding=1,
+                mask_type='A',
+            ),
+            nn.BatchNorm2d(latent_channels),
+            module.Swish(),
+            module.MaskedConv2d(
+                latent_channels,
+                n_embeddings,
+                kernel_size=5,
+                padding=2,
+                mask_type='B',
+            ),
+            lambda logits: D.Categorical(logits=logits.permute(0, 2, 3, 1))
+            # lambda x: x.chunk(2, dim=1),
+            # lambda loc, scale: D.Normal(loc=loc, scale=F.softplus(scale)),
         )
     
     def forward(self, feature):
         quantized, commitment_loss, perplexity, usage, indices = (
             self.quantized(feature)
         )
-        sample_loss = -self.distribution().log_prob(indices).mean()
+        sample_loss = -self.distribution(quantized).log_prob(
+            indices.view(-1, *self.feature_shape[-2:])
+        ).mean()
         return (
             self.compute(quantized),
             commitment_loss,
@@ -85,18 +104,23 @@ class AbsoluteDecoderBlock(nn.Module):
             usage,
         )
 
-    def distribution(self):
-        return D.Categorical(logits=self.logits)
-
     def generated(self, n_samples):
-        indices = self.distribution().sample((n_samples,))
-        return self.compute(
-            self.quantizer.embedding(indices)
-            .detach()
-            .view(-1, *self.feature_shape[-2:], self.latent_channels)
-            .permute(0, 3, 1, 2)
-            .contiguous()
-        )
+        quantized = torch.zeros(
+            n_samples, self.latent_channels, *self.feature_shape[-2:]
+        ).to(module_device(self))
+        for w in range(self.feature_shape[-1]):
+            for h in range(self.feature_shape[-2]):
+                indices = self.distribution(quantized).sample()
+                quantized = (
+                    self.quantizer.embedding(indices)
+                    .detach()
+                    .view(-1, *self.feature_shape[-2:], self.latent_channels)
+                    .permute(0, 3, 1, 2)
+                    .contiguous()
+                )
+                print('absolute generated', quantized.shape)
+
+        return self.compute(quantized)
 
 
 class RelativeDecoderBlock(nn.Module):
@@ -109,10 +133,9 @@ class RelativeDecoderBlock(nn.Module):
         self.latent_channels = latent_channels
         in_channels = previous_shape[1] + feature_shape[1]
         channels = feature_shape[1]
-        feature_size = np.prod(feature_shape[-2:])
 
         self.quantizer = module.VectorQuantizer(
-            latent_channels * feature_size,
+            latent_channels,
             n_embeddings=self.n_embeddings,
         )
         self.quantized = ModuleCompose(
@@ -135,18 +158,41 @@ class RelativeDecoderBlock(nn.Module):
                 )
             ),
         )
-        self.logits = nn.Sequential(
-            DecoderCell(previous_shape[1]),
-            nn.AdaptiveAvgPool2d(1),
-            nn.Conv2d(previous_shape[1], self.n_embeddings, kernel_size=1),
-            nn.Flatten(),
+        self.distribution = ModuleCompose(
+            (
+                DecoderCell(previous_shape[1]),
+                lambda module, previous, target: (
+                    torch.cat([module(previous), target], dim=1),
+                ),
+            ),    
+            module.MaskedConv2d(
+                previous_shape[1] + latent_channels,
+                previous_shape[1] + latent_channels,
+                kernel_size=5,
+                padding=2,
+                mask_type='A',
+            ),
+            nn.BatchNorm2d(previous_shape[1] + latent_channels),
+            module.Swish(),
+            module.MaskedConv2d(
+                previous_shape[1] + latent_channels,
+                n_embeddings,
+                kernel_size=5,
+                padding=2,
+                mask_type='B',
+            ),
+            lambda logits: D.Categorical(logits=logits.permute(0, 2, 3, 1))
+            # lambda x: x.chunk(2, dim=1),
+            # lambda loc, scale: D.Normal(loc=loc, scale=F.softplus(scale)),
         )
 
     def forward(self, previous, feature):
         quantized, commitment_loss, perplexity, usage, indices = self.quantized(
             previous, feature
         )
-        sample_loss = -self.distribution(previous).log_prob(indices).mean()
+        sample_loss = -self.distribution(previous, quantized).log_prob(
+            indices.view(-1, *self.feature_shape[-2:])
+        ).mean()
         return (
             self.compute(
                 torch.cat([
@@ -160,19 +206,37 @@ class RelativeDecoderBlock(nn.Module):
             usage,
         )
 
-    def distribution(self, previous):
-        return D.Categorical(logits=self.logits(previous))
-
     def generated(self, previous):
-        indices = self.distribution(previous).sample()
-        quantized = (
-            self.quantizer.embedding(indices)
-            .detach()
-            .view(-1, *self.feature_shape[-2:], self.latent_channels)
-            .permute(0, 3, 1, 2)
-            .contiguous()
-        )
+        print('relative generated', previous.shape)
+        quantized = torch.zeros(
+            previous.shape[0], self.latent_channels, *self.feature_shape[-2:]
+        ).to(module_device(self))
+        for w in range(self.feature_shape[-1]):
+            for h in range(self.feature_shape[-2]):
+                indices = self.distribution(previous, quantized).sample(
+                    # (previous.shape[0], *self.feature_shape[-2:])
+                )
+                quantized = (
+                    self.quantizer.embedding(indices)
+                    .detach()
+                    .view(-1, *self.feature_shape[-2:], self.latent_channels)
+                    .permute(0, 3, 1, 2)
+                    .contiguous()
+                )
+
         return self.compute(torch.cat([quantized, previous], dim=1))
+
+
+    # def generated(self, previous):
+    #     indices = self.distribution(previous).sample()
+    #     quantized = (
+    #         self.quantizer.embedding(indices, *self.feature_shape[-2:])
+    #         .detach()
+    #         .view(-1, *self.feature_shape[-2:], self.latent_channels)
+    #         .permute(0, 3, 1, 2)
+    #         .contiguous()
+    #     )
+    #     return self.compute(torch.cat([quantized, previous], dim=1))
 
 
 class DecoderNVAE(nn.Module):
