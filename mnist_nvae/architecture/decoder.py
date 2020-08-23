@@ -47,6 +47,25 @@ class DecoderCell(nn.Module):
         return x + self.seq(x)
 
 
+class MaskedCell(nn.Module):
+    def __init__(self, in_channels, out_channels, unmasked_channels=0):
+        super().__init__()
+        self.sequential = nn.Sequential(
+            module.Swish(),
+            module.MaskedConv2d(
+                in_channels,
+                out_channels,
+                kernel_size=5,
+                padding=2,
+                unmasked_channels=unmasked_channels,
+                mask_type='B',
+            ),
+        )
+
+    def forward(self, x):
+        return self.sequential(x) + x
+
+
 class AbsoluteDecoderBlock(nn.Module):
     def __init__(self, feature_shape, latent_channels, n_embeddings):
         super().__init__()
@@ -75,7 +94,15 @@ class AbsoluteDecoderBlock(nn.Module):
                 padding=1,
                 mask_type='A',
             ),
-            nn.BatchNorm2d(latent_channels),
+            MaskedCell(latent_channels, latent_channels),
+            MaskedCell(latent_channels, latent_channels),
+            MaskedCell(latent_channels, latent_channels),
+            MaskedCell(latent_channels, latent_channels),
+            # nn.Conv2d(
+            #     latent_channels,
+            #     n_embeddings,
+            #     kernel_size=1,
+            # ),
             module.Swish(),
             module.MaskedConv2d(
                 latent_channels,
@@ -170,9 +197,21 @@ class RelativeDecoderBlock(nn.Module):
                 previous_shape[1] + latent_channels,
                 kernel_size=5,
                 padding=2,
+                unmasked_channels=previous_shape[1],
                 mask_type='A',
             ),
-            nn.BatchNorm2d(previous_shape[1] + latent_channels),
+            MaskedCell(previous_shape[1] + latent_channels, previous_shape[1] + latent_channels, unmasked_channels=previous_shape[1]),
+            MaskedCell(previous_shape[1] + latent_channels, previous_shape[1] + latent_channels, unmasked_channels=previous_shape[1]),
+            MaskedCell(previous_shape[1] + latent_channels, previous_shape[1] + latent_channels, unmasked_channels=previous_shape[1]),
+            MaskedCell(previous_shape[1] + latent_channels, previous_shape[1] + latent_channels, unmasked_channels=previous_shape[1]),
+            MaskedCell(previous_shape[1] + latent_channels, previous_shape[1] + latent_channels, unmasked_channels=previous_shape[1]),
+            MaskedCell(previous_shape[1] + latent_channels, previous_shape[1] + latent_channels, unmasked_channels=previous_shape[1]),
+            MaskedCell(previous_shape[1] + latent_channels, previous_shape[1] + latent_channels, unmasked_channels=previous_shape[1]),
+            # nn.Conv2d(
+            #     previous_shape[1] + latent_channels,
+            #     n_embeddings,
+            #     kernel_size=1,
+            # ),
             module.Swish(),
             module.MaskedConv2d(
                 previous_shape[1] + latent_channels,
@@ -180,6 +219,7 @@ class RelativeDecoderBlock(nn.Module):
                 kernel_size=5,
                 padding=2,
                 mask_type='B',
+                unmasked_channels=previous_shape[1]
             ),
             lambda logits: D.Categorical(logits=logits.permute(0, 2, 3, 1))
             # lambda x: x.chunk(2, dim=1),
