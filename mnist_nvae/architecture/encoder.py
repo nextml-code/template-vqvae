@@ -45,4 +45,4 @@ class Encoder(nn.Module):
         for level in self.levels:
             head = level(head)
             features.append(head)
-        return features
+        return features[2:]
