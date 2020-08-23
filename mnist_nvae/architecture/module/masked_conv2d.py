@@ -6,7 +6,7 @@ from torch import nn
 # TODO: refactor this
 class MaskedConv2d(nn.Conv2d):
     
-    def __init__(self, *args, mask_type='B', **kwargs):
+    def __init__(self, *args, mask_type='B', unmasked_channels=0, **kwargs):
         super(MaskedConv2d, self).__init__(*args, **kwargs)
         
         # Mask A) without center pixel
@@ -21,8 +21,10 @@ class MaskedConv2d(nn.Conv2d):
         mask = torch.ones_like(self.weight)
         _, _, height, width = self.weight.size()
         
-        mask[:, :, height // 2, width // 2 + (1 if mask_type == 'B' else 0):] = 0
-        mask[:, :, height // 2 + 1:] = 0
+        # out_channels, in_channels, h, w
+        # TODO: will unmasked_channels leak information?
+        mask[:, unmasked_channels:, height // 2, width // 2 + (1 if mask_type == 'B' else 0):] = 0
+        mask[:, unmasked_channels:, height // 2 + 1:] = 0
 
         self.mask = nn.Parameter(mask, requires_grad=False)
         
