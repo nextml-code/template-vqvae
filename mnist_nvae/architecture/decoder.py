@@ -106,13 +106,15 @@ class AbsoluteDecoderBlock(nn.Module):
             module.Swish(),
             module.MaskedConv2d(
                 latent_channels,
-                latent_channels * 2,
+                # latent_channels * 2,
+                n_embeddings,
                 kernel_size=5,
                 padding=2,
                 mask_type='B',
             ),
-            lambda x: x.chunk(2, dim=1),
-            lambda loc, scale: D.Normal(loc=loc, scale=F.softplus(scale)),
+            # lambda x: x.chunk(2, dim=1),
+            # lambda loc, scale: D.Normal(loc=loc, scale=F.softplus(scale)),
+            lambda logits: D.Categorical(logits=logits.permute(0, 2, 3, 1))
         )
     
     def forward(self, feature):
@@ -120,7 +122,8 @@ class AbsoluteDecoderBlock(nn.Module):
             self.quantized(feature)
         )
         sample_loss = -self.distribution(quantized).log_prob(
-            quantized.detach()
+            # quantized.detach()
+            indices.view(-1, *self.feature_shape[-2:])
         ).mean()
         return (
             self.compute(quantized),
@@ -136,8 +139,16 @@ class AbsoluteDecoderBlock(nn.Module):
         ).to(module_device(self))
         for w in range(self.feature_shape[-1]):
             for h in range(self.feature_shape[-2]):
-                continuous = self.distribution(quantized).sample()
-                quantized, *_ = self.quantizer(continuous)
+                # continuous = self.distribution(quantized).sample()
+                # quantized, *_ = self.quantizer(continuous)
+                indices = self.distribution(quantized).sample()
+                quantized = (
+                    self.quantizer.embedding(indices)
+                    .detach()
+                    .view(-1, *self.feature_shape[-2:], self.latent_channels)
+                    .permute(0, 3, 1, 2)
+                    .contiguous()
+                )
                 print('absolute generated', quantized.shape)
 
         return self.compute(quantized)
@@ -156,7 +167,7 @@ class RelativeDecoderBlock(nn.Module):
 
         self.quantizer = module.VectorQuantizer(
             latent_channels,
-            n_embeddings=self.n_embeddings,
+            n_embeddings=n_embeddings,
         )
         self.quantized = ModuleCompose(
             lambda previous, feature: (
@@ -208,15 +219,16 @@ class RelativeDecoderBlock(nn.Module):
             module.Swish(),
             module.MaskedConv2d(
                 previous_shape[1] + latent_channels,
-                # n_embeddings,
-                latent_channels * 2,
+                # latent_channels * 2,
+                n_embeddings,
                 kernel_size=5,
                 padding=2,
                 mask_type='B',
                 unmasked_channels=previous_shape[1]
             ),
-            lambda x: x.chunk(2, dim=1),
-            lambda loc, scale: D.Normal(loc=loc, scale=F.softplus(scale)),
+            # lambda x: x.chunk(2, dim=1),
+            # lambda loc, scale: D.Normal(loc=loc, scale=F.softplus(scale)),
+            lambda logits: D.Categorical(logits=logits.permute(0, 2, 3, 1))
         )
 
     def forward(self, previous, feature):
@@ -224,7 +236,8 @@ class RelativeDecoderBlock(nn.Module):
             previous, feature
         )
         sample_loss = -self.distribution(previous, quantized).log_prob(
-            quantized.detach()
+            # quantized.detach()
+            indices.view(-1, *self.feature_shape[-2:])
         ).mean()
         return (
             self.compute(
@@ -246,8 +259,16 @@ class RelativeDecoderBlock(nn.Module):
         ).to(module_device(self))
         for w in range(self.feature_shape[-1]):
             for h in range(self.feature_shape[-2]):
-                continous = self.distribution(previous, quantized).sample()
-                quantized, *_ = self.quantizer(continous)
+                # continous = self.distribution(previous, quantized).sample()
+                # quantized, *_ = self.quantizer(continous)
+                indices = self.distribution(previous, quantized).sample()
+                quantized = (
+                    self.quantizer.embedding(indices)
+                    .detach()
+                    .view(-1, *self.feature_shape[-2:], self.latent_channels)
+                    .permute(0, 3, 1, 2)
+                    .contiguous()
+                )
 
         return self.compute(torch.cat([quantized, previous], dim=1))
 
