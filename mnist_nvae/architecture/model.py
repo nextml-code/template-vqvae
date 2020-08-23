@@ -21,7 +21,7 @@ class Model(nn.Module):
             )),
             latent_channels=self.latent_channels,
             n_embeddings=256,  # TODO: list of sizes
-            level_sizes=[2 for index in range(config['levels'])],
+            level_sizes=[1 for index in range(config['levels'])],
         )
 
         def add_sn(m):

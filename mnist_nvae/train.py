@@ -114,6 +114,7 @@ def train(config):
     ).attach(trainer, evaluators)
 
     def log_examples(description):
+        @torch.no_grad()
         def log_examples_(engine, logger, event_name):
             n_examples = 5
             indices = np.random.choice(
