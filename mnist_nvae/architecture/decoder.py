@@ -13,13 +13,16 @@ from mnist_nvae.architecture.module import Swish
 
 def Upsample(in_channels, out_channels):
     # TODO: this will create a checkerboard artifact?
-    return nn.ConvTranspose2d(
-        in_channels,  # channels + previous_shape[1],
-        out_channels,  # channels // 2,
-        kernel_size=2,
-        stride=2,
-        # padding=1,
-        # output_padding=1,
+    return ModuleCompose(
+        nn.ConvTranspose2d(
+            in_channels,  # channels + previous_shape[1],
+            out_channels,  # channels // 2,
+            kernel_size=4,
+            stride=2,
+            # padding=1,
+            # output_padding=1,
+        ),
+        lambda x: x[..., 1:-1, 1:-1],
     )
 
 
