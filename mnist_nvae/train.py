@@ -29,9 +29,12 @@ def train(config):
     device = torch.device('cuda' if config['use_cuda'] else 'cpu')
 
     model = architecture.Model(config).to(device)
+    prior = model.prior()
     optimizer = torch.optim.Adamax(
         model.parameters(), lr=config['learning_rate']
     )
+    model.eval()
+    prior.train()
 
     train_state = dict(model=model, optimizer=optimizer)
 
@@ -54,11 +57,13 @@ def train(config):
         )
         return predictions, predictions.loss(examples)
 
-
-    @workflow.ignite.decorators.train(model, optimizer)
+    
+    @workflow.ignite.decorators.train(prior, optimizer)
     def train_batch(engine, examples):
-        predictions, loss = process_batch(examples)
-        loss.backward()
+        with workflow.torch.requires_nograd(model):
+            with workflow.torch.requires_grad(prior):
+                predictions, loss = process_batch(examples)
+                loss.backward()
 
         return dict(
             examples=examples,
@@ -112,6 +117,7 @@ def train(config):
         tensorboard_logger,
         config,
     ).attach(trainer, evaluators)
+
 
     def log_examples(description):
         @torch.no_grad()

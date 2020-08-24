@@ -48,7 +48,7 @@ class DecoderCell(nn.Module):
 
 
 class MaskedCell(nn.Module):
-    def __init__(self, in_channels, out_channels, unmasked_channels=0):
+    def __init__(self, in_channels, out_channels):
         super().__init__()
         self.sequential = nn.Sequential(
             module.Swish(),
@@ -57,7 +57,6 @@ class MaskedCell(nn.Module):
                 out_channels,
                 kernel_size=5,
                 padding=2,
-                unmasked_channels=unmasked_channels,
                 mask_type='B',
             ),
         )
@@ -201,16 +200,15 @@ class RelativeDecoderBlock(nn.Module):
                 previous_shape[1] + latent_channels,
                 kernel_size=5,
                 padding=2,
-                unmasked_channels=previous_shape[1],
                 mask_type='A',
             ),
-            MaskedCell(previous_shape[1] + latent_channels, previous_shape[1] + latent_channels, unmasked_channels=previous_shape[1]),
-            MaskedCell(previous_shape[1] + latent_channels, previous_shape[1] + latent_channels, unmasked_channels=previous_shape[1]),
-            MaskedCell(previous_shape[1] + latent_channels, previous_shape[1] + latent_channels, unmasked_channels=previous_shape[1]),
-            MaskedCell(previous_shape[1] + latent_channels, previous_shape[1] + latent_channels, unmasked_channels=previous_shape[1]),
-            MaskedCell(previous_shape[1] + latent_channels, previous_shape[1] + latent_channels, unmasked_channels=previous_shape[1]),
-            MaskedCell(previous_shape[1] + latent_channels, previous_shape[1] + latent_channels, unmasked_channels=previous_shape[1]),
-            MaskedCell(previous_shape[1] + latent_channels, previous_shape[1] + latent_channels, unmasked_channels=previous_shape[1]),
+            MaskedCell(previous_shape[1] + latent_channels, previous_shape[1] + latent_channels),
+            MaskedCell(previous_shape[1] + latent_channels, previous_shape[1] + latent_channels),
+            MaskedCell(previous_shape[1] + latent_channels, previous_shape[1] + latent_channels),
+            MaskedCell(previous_shape[1] + latent_channels, previous_shape[1] + latent_channels),
+            MaskedCell(previous_shape[1] + latent_channels, previous_shape[1] + latent_channels),
+            MaskedCell(previous_shape[1] + latent_channels, previous_shape[1] + latent_channels),
+            MaskedCell(previous_shape[1] + latent_channels, previous_shape[1] + latent_channels),
             # nn.Conv2d(
             #     previous_shape[1] + latent_channels,
             #     n_embeddings,
@@ -224,7 +222,6 @@ class RelativeDecoderBlock(nn.Module):
                 kernel_size=5,
                 padding=2,
                 mask_type='B',
-                unmasked_channels=previous_shape[1]
             ),
             # lambda x: x.chunk(2, dim=1),
             # lambda loc, scale: D.Normal(loc=loc, scale=F.softplus(scale)),
@@ -366,3 +363,13 @@ class DecoderNVAE(nn.Module):
                 head = relative_block.generated(head)
 
         return self.image(head)
+
+    def prior(self):
+        return nn.ModuleList(
+            [self.absolute_block.distribution]
+            + [
+                relative_block.distribution
+                for relative_block_list in self.relative_blocks
+                for relative_block in relative_block_list
+            ]
+        )
