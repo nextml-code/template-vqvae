@@ -55,3 +55,6 @@ class Model(nn.Module):
         return architecture.PredictionBatch(
             predicted_image=predicted_image.permute(0, 2, 3, 1),
         )
+
+    def prior(self):
+        return self.decoder.prior()
