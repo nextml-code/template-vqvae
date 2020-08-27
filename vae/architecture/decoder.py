@@ -7,8 +7,8 @@ import torch
 from torch.nn.utils import weight_norm
 from workflow.torch import module_device, ModuleCompose
 
-from mnist_nvae import tools
-from mnist_nvae.architecture import module
+from vae import tools
+from vae.architecture import module
 
 
 def Upsample(in_channels, out_channels):

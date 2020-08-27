@@ -4,8 +4,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from workflow.torch import ModuleCompose, module_device
 
-from mnist_nvae import architecture, problem
-from mnist_nvae.architecture import module
+from vae import architecture, problem
+from vae.architecture import module
 
 
 class Model(nn.Module):
