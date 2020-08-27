@@ -1,4 +1,5 @@
-# mnist_nvae
+# Vector Quantized Variational Autoencoder
+Simple VQ-VAE implementation to be used as template for training on other datasets. Intended for effective reuse and learning purposes. Will be improved on continually.
 
 ## Installation
 ```
